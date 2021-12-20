@@ -20,4 +20,9 @@ horovod/tensorflow/mpi_lib.so
 horovod/torch/test_cuda/
 lightning_logs
 
+.python-version
+build.log
+data-*/
+timelines.json
+timeline.json
 

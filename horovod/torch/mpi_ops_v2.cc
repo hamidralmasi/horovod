@@ -20,24 +20,77 @@
 #include <c10/cuda/CUDAException.h>
 #endif
 
+#include <sstream>
+#include <ctime>
+#include <iomanip>
+#include <cstdlib>
+
 #include <chrono>
 #include <memory>
 #include <thread>
 #include <torch/extension.h>
 #include <torch/torch.h>
+#include <sys/stat.h>
+
 
 #include "../common/operations.h"
 #include "adapter_v2.h"
 #include "cuda_util.h"
 #include "handle_manager.h"
 #include "ready_event.h"
+#include "spdlog/spdlog.h"
+#include "spdlog/sinks/basic_file_sink.h"
 
 namespace horovod {
 namespace torch {
 
+std::string _current_time_and_date() {
+  auto now = std::chrono::system_clock::now();
+  auto in_time_t = std::chrono::system_clock::to_time_t(now);
+
+  std::stringstream ss;
+  ss << std::put_time(std::localtime(&in_time_t), "%Y%m%d-%H%M%S");
+  return ss.str();
+}
+
+std::string _get_logpath() {
+  static auto _user_home =  std::string(std::getenv("HOME"));
+  std::string _timestamp = _current_time_and_date();
+  std::string _log_dir = _user_home + "/horovod_logs/mpi_events/";
+  bool _flag = mkdir(_log_dir.c_str(), 0777);
+  std::cout << "create dir: " << _log_dir << ", status: " << _flag << "\n";
+  static std::string _logfile = _log_dir
+    + "mpi-" +  _timestamp 
+    + "-rank" + std::to_string(horovod_rank())
+    + ".log";
+  std::cout << "logfile" << _logfile << "\n";
+  return _logfile;
+}
+
+std::shared_ptr<spdlog::logger> _get_logger() {
+  spdlog::set_pattern("%v");
+  auto _logger = spdlog::basic_logger_mt("basic_logger", _get_logpath());
+  return _logger;
+}
+
+std::string _fmt_msg(std::string event, std::string tensor_name) {
+  long timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+    std::chrono::system_clock::now().time_since_epoch()).count();
+  std::stringstream _ss;
+  _ss << event << "," << tensor_name << "," << timestamp;
+  return _ss.str();
+}
+
 static HandleManager handle_manager;
+static std::shared_ptr<spdlog::logger> _event_logger;
 
 namespace {
+
+void check_logger() {
+  if (!horovod::torch::_event_logger) {
+    horovod::torch::_event_logger = _get_logger();
+  }
+}
 
 std::string GetOpName(const std::string& prefix, const std::string& name,
                       int handle) {
@@ -76,6 +129,9 @@ int DoAllreduce(::torch::Tensor tensor, ::torch::Tensor output, int divisor,
                 int process_set_id) {
   ThrowIfError(common::CheckInitialized());
 
+  check_logger();
+  _event_logger->info(_fmt_msg("DoAllreduce-START", name));
+
   auto handle = handle_manager.AllocateHandle();
   auto device = GetDeviceID(tensor);
   common::ReadyEventList ready_event_list;
@@ -91,7 +147,7 @@ int DoAllreduce(::torch::Tensor tensor, ::torch::Tensor output, int divisor,
   auto enqueue_result = EnqueueTensorAllreduce(
       hvd_context, hvd_tensor, hvd_output, ready_event_list,
       GetOpName("allreduce", name, handle), device,
-      [handle, divisor, output, device](const Status& status) mutable {
+      [handle, divisor, output, device, name](const Status& status) mutable {
 #if HAVE_GPU
         auto hvd_event = status.event;
         if (hvd_event.event) {
@@ -104,6 +160,7 @@ int DoAllreduce(::torch::Tensor tensor, ::torch::Tensor output, int divisor,
           DivideInPlace(output, divisor);
         }
         handle_manager.MarkDone(handle, status);
+        _event_logger->info(_fmt_msg("DoAllreduce-DONE", name));
       }, reduce_op, prescale_factor, postscale_factor, process_set_id);
   ThrowIfError(enqueue_result);
 
@@ -115,6 +172,9 @@ int DoAllreduceCudaOnCPU(::torch::Tensor tensor, ::torch::Tensor output, int div
                          double prescale_factor, double postscale_factor,
                          int process_set_id) {
   ThrowIfError(common::CheckInitialized());
+
+  check_logger();
+  _event_logger->info(_fmt_msg("DoAllreduceCudaOnCPU-START", name));
 
   // Make async copy of input tensor to CPU tensor and record completion event.
   auto device = GetDeviceID(tensor);
@@ -135,7 +195,7 @@ int DoAllreduceCudaOnCPU(::torch::Tensor tensor, ::torch::Tensor output, int div
       hvd_context, hvd_cpu_buffer, hvd_cpu_buffer, ready_event_list,
       GetOpName("allreduce", name, handle), CPU_DEVICE_ID,
       [handle, divisor, cpu_buffer, output,
-       device](const Status& status) mutable {
+       device, name](const Status& status) mutable {
         // Since the operation was on CPU, need to perform copy with the GPU
         // device guard.
         with_device device_guard(device);
@@ -144,6 +204,7 @@ int DoAllreduceCudaOnCPU(::torch::Tensor tensor, ::torch::Tensor output, int div
           DivideInPlace(output, divisor);
         }
         handle_manager.MarkDone(handle, status);
+        _event_logger->info(_fmt_msg("DoAllreduceCudaOnCPU-DONE", name));
       }, reduce_op, prescale_factor, postscale_factor, process_set_id);
   ThrowIfError(enqueue_result);
 
@@ -304,6 +365,9 @@ int DoAllgather(::torch::Tensor tensor, ::torch::Tensor output,
                 const std::string& name, int process_set_id) {
   ThrowIfError(common::CheckInitialized());
 
+  check_logger();
+  _event_logger->info(_fmt_msg("DoAllgather-START", name));
+
   auto device = GetDeviceID(tensor);
   common::ReadyEventList ready_event_list;
 #if HAVE_GPU
@@ -316,7 +380,7 @@ int DoAllgather(::torch::Tensor tensor, ::torch::Tensor output,
   auto enqueue_result =
       EnqueueTensorAllgather(hvd_context, hvd_tensor, ready_event_list,
                              GetOpName("allgather", name, handle), device,
-                             [handle, device](const Status& status) {
+                             [handle, device, name](const Status& status) {
 #if HAVE_GPU
                                auto hvd_event = status.event;
                                if (hvd_event.event) {
@@ -325,6 +389,7 @@ int DoAllgather(::torch::Tensor tensor, ::torch::Tensor output,
                                }
 #endif
                                handle_manager.MarkDone(handle, status);
+                               _event_logger->info(_fmt_msg("DoAllgather-DONE", name));
                              }, process_set_id);
   ThrowIfError(enqueue_result);
 
@@ -334,6 +399,9 @@ int DoAllgather(::torch::Tensor tensor, ::torch::Tensor output,
 int DoAllgatherCudaOnCPU(::torch::Tensor tensor, ::torch::Tensor output,
                          const std::string& name, int process_set_id) {
   ThrowIfError(common::CheckInitialized());
+
+  check_logger();
+  _event_logger->info(_fmt_msg("DoAllgatherCudaOnCPU-START", name));
 
   // Make async copy of input tensor to CPU tensor and record completion event.
   auto device = GetDeviceID(tensor);
@@ -354,7 +422,7 @@ int DoAllgatherCudaOnCPU(::torch::Tensor tensor, ::torch::Tensor output,
   auto enqueue_result = EnqueueTensorAllgather(
       hvd_context, hvd_cpu_tensor, ready_event_list,
       GetOpName("allgather", name, handle), CPU_DEVICE_ID,
-      [handle, cpu_output, output, device](const Status& status) mutable {
+      [handle, cpu_output, output, device, name](const Status& status) mutable {
         // Since the operation was on CPU, need to perform copy with the GPU
         // device guard.
         with_device device_guard(device);
@@ -362,6 +430,7 @@ int DoAllgatherCudaOnCPU(::torch::Tensor tensor, ::torch::Tensor output,
         output.resize_(cpu_output.sizes());
         output.copy_(cpu_output);
         handle_manager.MarkDone(handle, status);
+        _event_logger->info(_fmt_msg("DoAllgatherCudaOnCPU-DONE", name));
       }, process_set_id);
   ThrowIfError(enqueue_result);
 
@@ -371,6 +440,9 @@ int DoAllgatherCudaOnCPU(::torch::Tensor tensor, ::torch::Tensor output,
 int DoBroadcast(::torch::Tensor tensor, ::torch::Tensor output, int root_rank,
                 const std::string& name, int process_set_id) {
   ThrowIfError(common::CheckInitialized());
+
+  check_logger();
+  _event_logger->info(_fmt_msg("DoBroadcast-START", name));
 
   auto device = GetDeviceID(tensor);
   common::ReadyEventList ready_event_list;
@@ -393,7 +465,7 @@ int DoBroadcast(::torch::Tensor tensor, ::torch::Tensor output, int root_rank,
   auto enqueue_result =
       EnqueueTensorBroadcast(hvd_context, hvd_tensor, hvd_output, root_rank,
                              ready_event_list, GetOpName("broadcast", name, handle),
-                             device, [handle, device](const Status& status) {
+                             device, [handle, device, name](const Status& status) {
 #if HAVE_GPU
                                auto hvd_event = status.event;
                                if (hvd_event.event) {
@@ -402,6 +474,7 @@ int DoBroadcast(::torch::Tensor tensor, ::torch::Tensor output, int root_rank,
                                }
 #endif
                                handle_manager.MarkDone(handle, status);
+                               _event_logger->info(_fmt_msg("DoBroadcast-DONE", name));
                              }, process_set_id);
   ThrowIfError(enqueue_result);
 
@@ -411,6 +484,9 @@ int DoBroadcast(::torch::Tensor tensor, ::torch::Tensor output, int root_rank,
 int DoBroadcastCudaOnCPU(::torch::Tensor tensor, ::torch::Tensor output, int root_rank,
                          const std::string& name, int process_set_id) {
   ThrowIfError(common::CheckInitialized());
+
+  check_logger();
+  _event_logger->info(_fmt_msg("DoBroadcastCudaOnCPU-START", name));
 
   // Make async copy of input tensor to CPU tensor and record completion event.
   auto device = GetDeviceID(tensor);
@@ -429,12 +505,13 @@ int DoBroadcastCudaOnCPU(::torch::Tensor tensor, ::torch::Tensor output, int roo
   auto enqueue_result = EnqueueTensorBroadcast(
       hvd_context, hvd_cpu_buffer, hvd_cpu_buffer, root_rank, ready_event_list,
       GetOpName("broadcast", name, handle), CPU_DEVICE_ID,
-      [handle, cpu_buffer, output, device](const Status& status) mutable {
+      [handle, cpu_buffer, output, device, name](const Status& status) mutable {
         // Since the operation was on CPU, need to perform copy with the GPU
         // device guard.
         with_device device_guard(device);
         output.copy_(cpu_buffer);
         handle_manager.MarkDone(handle, status);
+        _event_logger->info(_fmt_msg("DoBroadcastCudaOnCPU-DONE", name));
       }, process_set_id);
   ThrowIfError(enqueue_result);
 

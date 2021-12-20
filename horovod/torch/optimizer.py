@@ -32,6 +32,30 @@ from horovod.torch.mpi_ops import Average, Adasum, Sum
 from horovod.torch.mpi_ops import rocm_built
 from horovod.torch.mpi_ops import ProcessSet, global_process_set
 
+import logging
+import os
+from datetime import datetime
+import time
+
+def _init_logging():
+    class MyLogger:
+        def __init__(self, logpath):
+            self.log_file = open(logpath, 'w+')
+        def debug(self, msg):
+            self.log_file.write(msg + '\n')
+        def __del__(self):
+            self.log_file.close()
+
+    logdir = "~/horovod_logs/hooks"
+    logdir = os.path.expanduser(logdir)
+    if not os.path.exists(logdir):
+        os.makedirs(logdir)
+    dt = datetime.fromtimestamp(time.time())
+    timestamp = dt.strftime("%Y%m%d-%H%M%S")
+    logging_file = os.path.join(logdir, "hook-{}-rank{}.log".format(timestamp, rank()))
+    print(logging_file)
+    logger = MyLogger(logging_file)
+    return logger
 
 class _DistributedOptimizer(torch.optim.Optimizer):
     def __init__(self, params, named_parameters, compression,
@@ -41,6 +65,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
                  sparse_as_dense=False,
                  process_set=global_process_set):
         super(self.__class__, self).__init__(params)
+        self.logger = _init_logging()
         self._compression = compression
 
         if named_parameters is not None:
@@ -222,6 +247,17 @@ class _DistributedOptimizer(torch.optim.Optimizer):
                                         process_set=self.process_set)
         return handle, None
 
+    def _log_grad_complete(self, p):
+        """"""
+        pname = self._parameter_names.get(p)
+        # import pdb;pdb.set_trace()
+        # print(type(pname), pname)
+        # print(type(local_rank), local_rank)
+        # lobj = {"ph": "X", "name": pname, "ts": time.time(), "pid": local_rank(), "dur": 1e-6}
+        # record the in microseconds.
+        self.logger.debug("{},{},{}".format("GradientCompute-DONE", pname, time.time()*1e6))
+
+
     def _make_hook(self, p):
         def hook(*ignore):
             if p in self._handles and self._handles[p][0] is not None:
@@ -233,6 +269,8 @@ class _DistributedOptimizer(torch.optim.Optimizer):
                         "accumulate gradients locally.")
             assert not p.grad.requires_grad
             assert self._allreduce_delay[p] > 0
+            # log the completing time
+            self._log_grad_complete(p)
             handle, ctx = None, None
             self._allreduce_delay[p] -= 1
             if self._allreduce_delay[p] == 0:

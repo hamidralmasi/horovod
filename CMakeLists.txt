@@ -30,6 +30,7 @@ create_metadata()
 
 # 3rd-parties
 include_directories("third_party/HTTPRequest/include"
+        "third_party/spdlog/include"
         "third_party/boost/assert/include"
         "third_party/boost/config/include"
         "third_party/boost/core/include"
