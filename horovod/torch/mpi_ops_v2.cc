@@ -218,6 +218,9 @@ int DoGroupedAllreduce(const std::vector<::torch::Tensor>& tensors,
                        int process_set_id) {
   ThrowIfError(common::CheckInitialized());
 
+  check_logger();
+  _event_logger->info(_fmt_msg("DoGroupedAllreduce-START", name));
+
   auto handle = handle_manager.AllocateHandle();
   auto device = GetDeviceID(tensors[0]);
   common::ReadyEventList ready_event_list;
@@ -295,6 +298,9 @@ int DoGroupedAllreduceCudaOnCPU(const std::vector<::torch::Tensor>& tensors,
                                 int reduce_op_int, double prescale_factor,
                                 double postscale_factor, int process_set_id) {
   ThrowIfError(common::CheckInitialized());
+
+  check_logger();
+  _event_logger->info(_fmt_msg("DoGroupedAllreduceCudaOnCPU-START", name));
 
   auto handle = handle_manager.AllocateHandle();
   auto device = GetDeviceID(tensors[0]);
@@ -523,6 +529,9 @@ int DoAlltoall(::torch::Tensor tensor, ::torch::Tensor splits,
                const std::string& name, int process_set_id) {
   ThrowIfError(common::CheckInitialized());
 
+  check_logger();
+  _event_logger->info(_fmt_msg("DoAlltoall-START", name));
+
   auto device = GetDeviceID(tensor);
   common::ReadyEventList ready_event_list;
 #if HAVE_GPU
@@ -549,7 +558,7 @@ int DoAlltoall(::torch::Tensor tensor, ::torch::Tensor splits,
       hvd_context, hvd_tensor, hvd_cpu_splits, ready_event_list,
       GetOpName("alltoall", name, handle), device,
       [handle, cpu_received_splits, output_received_splits,
-       received_splits_device, device](const Status& status) mutable {
+       received_splits_device, device, name](const Status& status) mutable {
 #if HAVE_GPU
         auto hvd_event = status.event;
         if (hvd_event.event) {
@@ -562,7 +571,8 @@ int DoAlltoall(::torch::Tensor tensor, ::torch::Tensor splits,
           output_received_splits.resize_(cpu_received_splits.sizes());
           output_received_splits.copy_(cpu_received_splits);
         }
-        handle_manager.MarkDone(handle, status); 
+        handle_manager.MarkDone(handle, status);
+        _event_logger->info(_fmt_msg("DoAlltoall-DONE", name)); 
       }, process_set_id);
   ThrowIfError(enqueue_result);
 
@@ -574,6 +584,9 @@ int DoAlltoallCudaOnCPU(::torch::Tensor tensor, ::torch::Tensor splits,
                         ::torch::Tensor output_received_splits,
                         const std::string& name, int process_set_id) {
   ThrowIfError(common::CheckInitialized());
+
+  check_logger();
+  _event_logger->info(_fmt_msg("DoAlltoallCudaOnCPU-START", name));
 
   // Make sync copy of splits tensor to CPU if needed
   auto cpu_splits =
@@ -610,7 +623,7 @@ int DoAlltoallCudaOnCPU(::torch::Tensor tensor, ::torch::Tensor splits,
       GetOpName("alltoall", name, handle), CPU_DEVICE_ID,
       [handle, cpu_output, output, device, cpu_received_splits,
        output_received_splits,
-       received_splits_device](const Status& status) mutable {
+       received_splits_device, name](const Status& status) mutable {
         { // Since the operation was on CPU, need to perform copy with the GPU
           // device guard.
           with_device device_guard(device);
@@ -624,6 +637,7 @@ int DoAlltoallCudaOnCPU(::torch::Tensor tensor, ::torch::Tensor splits,
           output_received_splits.copy_(cpu_received_splits);
         }
         handle_manager.MarkDone(handle, status);
+        _event_logger->info(_fmt_msg("DoAlltoallCudaOnCPU-DONE", name)); 
       }, process_set_id);
   ThrowIfError(enqueue_result);
 
