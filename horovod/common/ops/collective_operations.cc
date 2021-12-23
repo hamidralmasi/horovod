@@ -41,7 +41,7 @@ namespace common {
 std::string _get_logpath() {
   static auto _user_home =  std::string(std::getenv("HOME"));
   std::string _timestamp = _current_time_and_date();
-  std::string _log_dir = _user_home + "/horovod_logs/mpi_events/";
+  std::string _log_dir = _user_home + "/horovod_logs/waiting_times/";
   bool _flag = mkdir(_log_dir.c_str(), 0777);
   std::cout << "create dir: " << _log_dir << ", status: " << _flag << "\n";
   static std::string _logfile = _log_dir
@@ -54,7 +54,7 @@ std::string _get_logpath() {
 
 std::shared_ptr<spdlog::logger> _get_logger() {
   spdlog::set_pattern("%v");
-  auto _logger = spdlog::basic_logger_mt("basic_logger", _get_logpath());
+  auto _logger = spdlog::basic_logger_mt("waiting_logger", _get_logpath());
   return _logger;
 }
 
