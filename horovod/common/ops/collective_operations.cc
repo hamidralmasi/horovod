@@ -18,8 +18,61 @@
 #include "collective_operations.h"
 #include "../message.h"
 
+#include <sstream>
+#include <ctime>
+#include <iomanip>
+#include <cstdlib>
+#include <sys/stat.h>
+#include "spdlog/spdlog.h"
+#include "spdlog/sinks/basic_file_sink.h"
+
 namespace horovod {
 namespace common {
+
+  std::string _current_time_and_date() {
+  auto now = std::chrono::system_clock::now();
+  auto in_time_t = std::chrono::system_clock::to_time_t(now);
+
+  std::stringstream ss;
+  ss << std::put_time(std::localtime(&in_time_t), "%Y%m%d-%H%M%S");
+  return ss.str();
+}
+
+std::string _get_logpath() {
+  static auto _user_home =  std::string(std::getenv("HOME"));
+  std::string _timestamp = _current_time_and_date();
+  std::string _log_dir = _user_home + "/horovod_logs/mpi_events/";
+  bool _flag = mkdir(_log_dir.c_str(), 0777);
+  std::cout << "create dir: " << _log_dir << ", status: " << _flag << "\n";
+  static std::string _logfile = _log_dir
+    + "mpi-" +  _timestamp 
+    + "-rank" + std::to_string(horovod_rank())
+    + ".log";
+  std::cout << "logfile" << _logfile << "\n";
+  return _logfile;
+}
+
+std::shared_ptr<spdlog::logger> _get_logger() {
+  spdlog::set_pattern("%v");
+  auto _logger = spdlog::basic_logger_mt("basic_logger", _get_logpath());
+  return _logger;
+}
+
+std::string _fmt_msg(std::string event, std::string tensor_name) {
+  long timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+    std::chrono::system_clock::now().time_since_epoch()).count();
+  std::stringstream _ss;
+  _ss << event << "," << tensor_name << "," << timestamp;
+  return _ss.str();
+}
+
+static std::shared_ptr<spdlog::logger> _event_logger;
+
+void check_logger() {
+  if (!horovod::common::_event_logger) {
+    horovod::common::_event_logger = _get_logger();
+  }
+}
 
 HorovodOp::HorovodOp(HorovodGlobalState* global_state)
     : global_state_(global_state) {}
@@ -52,6 +105,8 @@ void HorovodOp::WaitForData(std::vector<TensorTableEntry>& entries) {
         ++it;
       }
     }
+    check_logger();
+    _event_logger->info(_fmt_msg("WaitForData", "100"));
     std::this_thread::sleep_for(std::chrono::nanoseconds(100));
   }
   for (auto& e : entries) {
