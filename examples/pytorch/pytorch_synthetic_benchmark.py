@@ -7,7 +7,8 @@ from torchvision import models
 import horovod.torch as hvd
 import timeit
 import numpy as np
-
+import nvidia_dlprof_pytorch_nvtx
+nvidia_dlprof_pytorch_nvtx.init()
 # Benchmark settings
 parser = argparse.ArgumentParser(description='PyTorch Synthetic Benchmark',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -100,15 +101,15 @@ log('Number of %ss: %d' % (device, hvd.size()))
 # Warm-up
 log('Running warmup...')
 timeit.timeit(benchmark_step, number=args.num_warmup_batches)
-
-# Benchmark
-log('Running benchmark...')
-img_secs = []
-for x in range(args.num_iters):
-    time = timeit.timeit(benchmark_step, number=args.num_batches_per_iter)
-    img_sec = args.batch_size * args.num_batches_per_iter / time
-    log('Iter #%d: %.1f img/sec per %s' % (x, img_sec, device))
-    img_secs.append(img_sec)
+with torch.autograd.profiler.emit_nvtx():
+    # Benchmark
+    log('Running benchmark...')
+    img_secs = []
+    for x in range(args.num_iters):
+        time = timeit.timeit(benchmark_step, number=args.num_batches_per_iter)
+        img_sec = args.batch_size * args.num_batches_per_iter / time
+        log('Iter #%d: %.1f img/sec per %s' % (x, img_sec, device))
+        img_secs.append(img_sec)
 
 # Results
 img_sec_mean = np.mean(img_secs)
