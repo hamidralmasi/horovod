@@ -74,7 +74,7 @@ std::shared_ptr<spdlog::logger> _get_logger() {
 }
 
 std::string _fmt_msg(std::string event, std::string tensor_name) {
-  long timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+  long timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
     std::chrono::system_clock::now().time_since_epoch()).count();
   std::stringstream _ss;
   _ss << event << "," << tensor_name << "," << timestamp;
