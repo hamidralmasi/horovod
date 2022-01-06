@@ -163,7 +163,7 @@ int DoAllreduce(::torch::Tensor tensor, ::torch::Tensor output, int divisor,
           DivideInPlace(output, divisor);
         }
         handle_manager.MarkDone(handle, status);
-        
+
         // _event_logger->info(_fmt_msg("DoAllreduce-DONE", name));
 
         long timestamp_end = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -171,7 +171,7 @@ int DoAllreduce(::torch::Tensor tensor, ::torch::Tensor output, int divisor,
         long duration = timestamp_end - timestamp_start;
         std::stringstream _ss;
         _ss << timestamp_start << "," << duration;
-        _event_logger->info(_ss);
+        _event_logger->info(_ss.str());
 
       }, reduce_op, prescale_factor, postscale_factor, process_set_id);
   ThrowIfError(enqueue_result);
