@@ -130,7 +130,10 @@ int DoAllreduce(::torch::Tensor tensor, ::torch::Tensor output, int divisor,
   ThrowIfError(common::CheckInitialized());
 
   check_logger();
-  _event_logger->info(_fmt_msg("DoAllreduce-START", name));
+  //_event_logger->info(_fmt_msg("DoAllreduce-START", name));
+
+  long timestamp_start = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    std::chrono::system_clock::now().time_since_epoch()).count();
 
   auto handle = handle_manager.AllocateHandle();
   auto device = GetDeviceID(tensor);
@@ -147,7 +150,7 @@ int DoAllreduce(::torch::Tensor tensor, ::torch::Tensor output, int divisor,
   auto enqueue_result = EnqueueTensorAllreduce(
       hvd_context, hvd_tensor, hvd_output, ready_event_list,
       GetOpName("allreduce", name, handle), device,
-      [handle, divisor, output, device, name](const Status& status) mutable {
+      [handle, divisor, output, device, name, timestamp_start](const Status& status) mutable {
 #if HAVE_GPU
         auto hvd_event = status.event;
         if (hvd_event.event) {
@@ -160,7 +163,16 @@ int DoAllreduce(::torch::Tensor tensor, ::torch::Tensor output, int divisor,
           DivideInPlace(output, divisor);
         }
         handle_manager.MarkDone(handle, status);
-        _event_logger->info(_fmt_msg("DoAllreduce-DONE", name));
+        
+        // _event_logger->info(_fmt_msg("DoAllreduce-DONE", name));
+
+        long timestamp_end = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    std::chrono::system_clock::now().time_since_epoch()).count();
+        long duration = timestamp_end - timestamp_start;
+        std::stringstream _ss;
+        _ss << timestamp_start << "," << duration;
+        _event_logger->info(_ss);
+
       }, reduce_op, prescale_factor, postscale_factor, process_set_id);
   ThrowIfError(enqueue_result);
 
@@ -447,8 +459,8 @@ int DoBroadcast(::torch::Tensor tensor, ::torch::Tensor output, int root_rank,
                 const std::string& name, int process_set_id) {
   ThrowIfError(common::CheckInitialized());
 
-  check_logger();
-  _event_logger->info(_fmt_msg("DoBroadcast-START", name));
+  // check_logger();
+  // _event_logger->info(_fmt_msg("DoBroadcast-START", name));
 
   auto device = GetDeviceID(tensor);
   common::ReadyEventList ready_event_list;
@@ -480,7 +492,7 @@ int DoBroadcast(::torch::Tensor tensor, ::torch::Tensor output, int root_rank,
                                }
 #endif
                                handle_manager.MarkDone(handle, status);
-                               _event_logger->info(_fmt_msg("DoBroadcast-DONE", name));
+                               // _event_logger->info(_fmt_msg("DoBroadcast-DONE", name));
                              }, process_set_id);
   ThrowIfError(enqueue_result);
 
