@@ -168,9 +168,9 @@ int DoAllreduce(::torch::Tensor tensor, ::torch::Tensor output, int divisor,
 
         long timestamp_end = std::chrono::duration_cast<std::chrono::nanoseconds>(
     std::chrono::system_clock::now().time_since_epoch()).count();
-        long duration = timestamp_end - timestamp_start;
+        //long duration = timestamp_end - timestamp_start;
         std::stringstream _ss;
-        _ss << timestamp_start << "," << duration;
+        _ss << timestamp_start << "," << timestamp_end;
         _event_logger->info(_ss.str());
 
       }, reduce_op, prescale_factor, postscale_factor, process_set_id);
