@@ -101,12 +101,15 @@ log('Number of %ss: %d' % (device, hvd.size()))
 # Warm-up
 log('Running warmup...')
 timeit.timeit(benchmark_step, number=args.num_warmup_batches)
+total_time = 0
 with torch.autograd.profiler.emit_nvtx():
     # Benchmark
     log('Running benchmark...')
     img_secs = []
     for x in range(args.num_iters):
         time = timeit.timeit(benchmark_step, number=args.num_batches_per_iter)
+        total_time = total_time + time
+        log('Time for iteration %d with %d batches in it: %.5f' % (x, args.num_batches_per_iter, time))
         img_sec = args.batch_size * args.num_batches_per_iter / time
         log('Iter #%d: %.1f img/sec per %s' % (x, img_sec, device))
         img_secs.append(img_sec)
@@ -117,3 +120,4 @@ img_sec_conf = 1.96 * np.std(img_secs)
 log('Img/sec per %s: %.1f +-%.1f' % (device, img_sec_mean, img_sec_conf))
 log('Total img/sec on %d %s(s): %.1f +-%.1f' %
     (hvd.size(), device, hvd.size() * img_sec_mean, hvd.size() * img_sec_conf))
+log('Total Time: %.5f' % total_time)

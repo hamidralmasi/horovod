@@ -459,8 +459,11 @@ int DoBroadcast(::torch::Tensor tensor, ::torch::Tensor output, int root_rank,
                 const std::string& name, int process_set_id) {
   ThrowIfError(common::CheckInitialized());
 
-  // check_logger();
+  check_logger();
   // _event_logger->info(_fmt_msg("DoBroadcast-START", name));
+
+  long timestamp_start = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    std::chrono::system_clock::now().time_since_epoch()).count();
 
   auto device = GetDeviceID(tensor);
   common::ReadyEventList ready_event_list;
@@ -483,7 +486,7 @@ int DoBroadcast(::torch::Tensor tensor, ::torch::Tensor output, int root_rank,
   auto enqueue_result =
       EnqueueTensorBroadcast(hvd_context, hvd_tensor, hvd_output, root_rank,
                              ready_event_list, GetOpName("broadcast", name, handle),
-                             device, [handle, device, name](const Status& status) {
+                             device, [handle, device, name, timestamp_start](const Status& status) {
 #if HAVE_GPU
                                auto hvd_event = status.event;
                                if (hvd_event.event) {
@@ -493,6 +496,12 @@ int DoBroadcast(::torch::Tensor tensor, ::torch::Tensor output, int root_rank,
 #endif
                                handle_manager.MarkDone(handle, status);
                                // _event_logger->info(_fmt_msg("DoBroadcast-DONE", name));
+                                long timestamp_end = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                std::chrono::system_clock::now().time_since_epoch()).count();
+                                //long duration = timestamp_end - timestamp_start;
+                                std::stringstream _ss;
+                                _ss << timestamp_start << "," << timestamp_end;
+                                _event_logger->info(_ss.str());
                              }, process_set_id);
   ThrowIfError(enqueue_result);
 
