@@ -501,7 +501,7 @@ int DoBroadcast(::torch::Tensor tensor, ::torch::Tensor output, int root_rank,
                                 //long duration = timestamp_end - timestamp_start;
                                 std::stringstream _ss;
                                 _ss << timestamp_start << "," << timestamp_end;
-                                _event_logger->info(_ss.str());
+                                //_event_logger->info(_ss.str());
                              }, process_set_id);
   ThrowIfError(enqueue_result);
 
